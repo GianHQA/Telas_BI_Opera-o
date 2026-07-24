@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Painel TV 55" — Power BI</title>
+    <style>
+        :root {
+            --canvas-w: 1920;          /* = tamanho da página no Power BI */
+            --canvas-h: 1080;
+            --overscan: 1;             /* 1.02 / 1.03 se a TV cortar as bordas */
+            --corte-rodape: 72px;      /* calibre com + e - */
+            --corte-lateral: 0px;
+        }
+
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background: #000;
+            font-family: "Segoe UI", system-ui, sans-serif;
+        }
+
+        .tela {
+            position: fixed; inset: 0;
+            display: flex; align-items: center; justify-content: center;
+            overflow: hidden;
+            opacity: 0; z-index: 0; pointer-events: none;
+            transition: opacity .4s ease-in-out;
+        }
+        .tela.active { opacity: 1; z-index: 1; pointer-events: auto; }
+
+        .canvas {
+            position: relative;
+            width: calc(var(--canvas-w) * 1px);
+            height: calc(var(--canvas-h) * 1px);
+            flex: 0 0 auto;
+            transform-origin: center center;
+            overflow: hidden;
+        }
+
+        .canvas iframe {
+            position: absolute; top: 0; left: 0;
+            width: calc(100% + var(--corte-lateral));
+            height: calc(100% + var(--corte-rodape));
+            border: none; display: block;
+        }
+
+        /* ---- Tela de autenticação (aparece só quando necessário) ---- */
+        #gate {
+            position: fixed; inset: 0; z-index: 500;
+            background: #05372b;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            color: #fff; text-align: center; gap: 24px;
+        }
+        #gate.oculto { display: none; }
+        #gate h1 { font-size: 34px; font-weight: 600; margin: 0; }
+        #gate p  { font-size: 18px; opacity: .8; margin: 0; max-width: 620px; line-height: 1.5; }
+        #gate button {
+            font-size: 20px; padding: 16px 42px; border: none; border-radius: 6px;
+            background: #00a884; color: #fff; cursor: pointer; font-weight: 600;
+        }
+        #gate button:disabled { opacity: .5; cursor: default; }
+
+        #status {
+            position: fixed; bottom: 12px; left: 12px; z-index: 99;
+            font: 14px/1 monospace; color: #fff; background: rgba(0,0,0,.75);
+            padding: 8px 12px; border-radius: 4px;
+            opacity: 0; transition: opacity .2s; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="gate" class="oculto">
+        <h1>Painel de Indicadores</h1>
+        <p id="gate-msg">É necessário entrar uma única vez na conta Microsoft.
+           A janela abre, você faz login e fecha — os dashboards carregam em seguida
+           reaproveitando a mesma sessão.</p>
+        <button id="gate-btn">Entrar no Power BI</button>
+    </div>
+
+    <div id="status">status</div>
+
+    <!-- data-src (e não src): os iframes NÃO carregam sozinhos.
+         O script carrega um de cada vez, para não disparar vários
+         fluxos de autenticação em paralelo. -->
+
+
+    <div class="tela active" data-tempo="30">
+        <div class="canvas">
+            <iframe data-src="https://app.powerbi.com/groups/a2b36b9b-5080-4bb9-af91-442cb109cb51/reports/6024ff22-b341-46ba-a62c-076ae248e709/ReportSectione7d34e15e6560d448f28?ctid=56eda749-b95e-4a74-93de-f01fd6b161cc&experience=power-bi&chromeless=true%22"></iframe>
+        </div>
+    </div>
+
+    <div class="tela" data-tempo="30">
+        <div class="canvas">
+            <iframe data-src="https://app.powerbi.com/groups/d0649602-6d4b-4517-ba0d-c273b2fc2d44/reports/b9dfe7d0-c017-4854-a475-335018a65480/ec0b622ea33e8adae530?ctid=56eda749-b95e-4a74-93de-f01fd6b161cc&experience=power-bi&chromeless=true%22"></iframe>
+        </div>
+    </div>
+
+    <div class="tela" data-tempo="30">
+        <div class="canvas">
+            <iframe data-src="https://app.powerbi.com/groups/d0649602-6d4b-4517-ba0d-c273b2fc2d44/reports/b9dfe7d0-c017-4854-a475-335018a65480/ec0b622ea33e8adae530?ctid=56eda749-b95e-4a74-93de-f01fd6b161cc&experience=power-bi&chromeless=true%22"></iframe>
+        </div>
+    </div>
+
+      <div class="tela" data-tempo="30">
+        <div class="canvas">
+            <iframe data-src="https://app.powerbi.com/groups/b1bc901a-4798-4595-85d5-cfab39dbab06/reports/e5936887-3018-4a88-9eb2-5ff124d2ccb1/a56c1f1ad7043854268a?ctid=56eda749-b95e-4a74-93de-f01fd6b161cc&experience=power-bi&bookmarkGuid=a0c7250c9e29f942ebc2&experience=power-bi&chromeless=true%22"></iframe>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        // ============ CONFIGURAÇÃO ============
+        const TEMPO_PADRAO      = 30;        // segundos por tela
+        const INTERVALO_REFRESH = 15 * 60;   // segundos entre recargas
+        const MODO              = 'cover';   // 'cover' preenche | 'contain' mostra tudo
+        const DELAY_ENTRE_LOADS = 2500;      // ms entre o carregamento de cada dashboard
+        const TIMEOUT_LOAD      = 25000;     // ms de espera máxima por dashboard
+        const URL_LOGIN         = 'https://app.powerbi.com/home';
+        const CHAVE_SESSAO      = 'tora_painel_login_ok';
+        // ======================================
+
+        const raiz     = getComputedStyle(document.documentElement);
+        const CANVAS_W = parseFloat(raiz.getPropertyValue('--canvas-w'));
+        const CANVAS_H = parseFloat(raiz.getPropertyValue('--canvas-h'));
+        const OVERSCAN = parseFloat(raiz.getPropertyValue('--overscan')) || 1;
+
+        const telas   = Array.from(document.querySelectorAll('.tela'));
+        const gate    = document.getElementById('gate');
+        const gateBtn = document.getElementById('gate-btn');
+        const gateMsg = document.getElementById('gate-msg');
+        const statusEl= document.getElementById('status');
+        let indexAtual = 0;
+        let rotacaoIniciada = false;
+
+        telas.forEach(t => {
+            const f = t.querySelector('iframe');
+            f.dataset.ultimoRefresh = 0;
+        });
+
+        function msg(txt, permanente) {
+            statusEl.textContent = txt;
+            statusEl.style.opacity = 1;
+            clearTimeout(statusEl._t);
+            if (!permanente) statusEl._t = setTimeout(() => statusEl.style.opacity = 0, 2500);
+        }
+
+        function escalar() {
+            const sx = window.innerWidth  / CANVAS_W;
+            const sy = window.innerHeight / CANVAS_H;
+            const s  = (MODO === 'cover' ? Math.max(sx, sy) : Math.min(sx, sy)) * OVERSCAN;
+            document.querySelectorAll('.canvas').forEach(c => c.style.transform = 'scale(' + s + ')');
+        }
+
+        function segundos(tela) {
+            const v = parseInt(tela.dataset.tempo, 10);
+            return (isNaN(v) || v <= 0 ? TEMPO_PADRAO : v) * 1000;
+        }
+
+        // ---------- Carregamento SEQUENCIAL ----------
+        // O primeiro iframe estabelece a sessão; os demais só entram depois
+        // que ele terminou, herdando o cookie já autenticado. É isso que
+        // elimina os N pop-ups simultâneos.
+        function carregarIframe(f) {
+            return new Promise(resolve => {
+                let pronto = false;
+                const fim = () => { if (!pronto) { pronto = true; resolve(); } };
+                f.addEventListener('load', () => {
+                    f.dataset.ultimoRefresh = Date.now();
+                    fim();
+                }, { once: true });
+                setTimeout(fim, TIMEOUT_LOAD);
+                f.src = f.dataset.src;
+            });
+        }
+
+        async function carregarTudo() {
+            for (let i = 0; i < telas.length; i++) {
+                msg('Carregando dashboard ' + (i + 1) + ' de ' + telas.length, true);
+                await carregarIframe(telas[i].querySelector('iframe'));
+
+                if (i === 0 && !rotacaoIniciada) {
+                    rotacaoIniciada = true;
+                    setTimeout(proxima, segundos(telas[0]));
+                }
+                if (i < telas.length - 1) {
+                    await new Promise(r => setTimeout(r, DELAY_ENTRE_LOADS));
+                }
+            }
+            msg('Painel pronto');
+        }
+
+        // ---------- Rotação ----------
+        function refreshSeNecessario(tela) {
+            const f = tela.querySelector('iframe');
+            if (!f.src) return;
+            if (Date.now() - Number(f.dataset.ultimoRefresh) >= INTERVALO_REFRESH * 1000) {
+                f.src = f.dataset.src;
+                f.dataset.ultimoRefresh = Date.now();
+            }
+        }
+
+        function proxima() {
+            const anterior = telas[indexAtual];
+            anterior.classList.remove('active');
+            indexAtual = (indexAtual + 1) % telas.length;
+            const atual = telas[indexAtual];
+            atual.classList.add('active');
+            setTimeout(() => refreshSeNecessario(anterior), 1000);
+            setTimeout(proxima, segundos(atual));
+        }
+
+        // ---------- Autenticação: UM pop-up, no máximo ----------
+        function abrirLogin() {
+            gateBtn.disabled = true;
+            gateMsg.textContent = 'Faça o login na janela que abriu. Assim que ela fechar, o painel inicia sozinho.';
+
+            const w = window.open(URL_LOGIN, 'tora_pbi_login',
+                                  'width=1100,height=850,menubar=no,toolbar=no');
+
+            if (!w) {
+                gateBtn.disabled = false;
+                gateMsg.textContent = 'O navegador bloqueou a janela. Libere pop-ups para este endereço e tente de novo.';
+                return;
+            }
+
+            const vigia = setInterval(() => {
+                if (w.closed) {
+                    clearInterval(vigia);
+                    try { localStorage.setItem(CHAVE_SESSAO, '1'); } catch (e) {}
+                    gate.classList.add('oculto');
+                    carregarTudo();
+                }
+            }, 800);
+        }
+
+        gateBtn.addEventListener('click', abrirLogin);
+
+        // ---------- Atalhos ----------
+        let corte = parseFloat(raiz.getPropertyValue('--corte-rodape')) || 72;
+        function aplicarCorte(v) {
+            corte = Math.max(0, v);
+            document.documentElement.style.setProperty('--corte-rodape', corte + 'px');
+            msg('--corte-rodape: ' + corte + 'px');
+        }
+        document.addEventListener('keydown', e => {
+            if (e.key === '+' || e.key === '=') aplicarCorte(corte + 4);
+            if (e.key === '-' || e.key === '_') aplicarCorte(corte - 4);
+            if (e.key.toLowerCase() === 'c') aplicarCorte(corte);
+            if (e.key.toLowerCase() === 'l') {          // forçar novo login
+                try { localStorage.removeItem(CHAVE_SESSAO); } catch (er) {}
+                location.reload();
+            }
+        });
+
+        // ---------- Início ----------
+        window.addEventListener('resize', escalar);
+        escalar();
+
+        let jaLogou = false;
+        try { jaLogou = localStorage.getItem(CHAVE_SESSAO) === '1'; } catch (e) {}
+
+        if (jaLogou) {
+            // Sessão do Windows / cookie já existente: nada de pop-up.
+            carregarTudo();
+        } else {
+            gate.classList.remove('oculto');
+        }
+    })();
+    </script>
+</body>
+</html>
